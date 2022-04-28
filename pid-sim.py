@@ -87,6 +87,7 @@ def metamodel():
             layers.Normalization(axis=-1),
             layers.Dense(16, input_shape=(2,), activation='sigmoid'),
             layers.Dense(8, activation='sigmoid'),
+            layers.Dense(8, activation='sigmoid'),
             layers.Dense(1, activation='relu'),
         ])
         regressor.compile(optimizer='adam', loss='mse', metrics=['mae'])
@@ -96,7 +97,7 @@ def metamodel():
     elif method == 'random_forest':
         from sklearn.ensemble import RandomForestRegressor
 
-        regressor = RandomForestRegressor()
+        regressor = RandomForestRegressor(n_estimators=1)
         regressor.fit(X_train, y_train)
 
         import time
@@ -112,14 +113,34 @@ def metamodel():
         print("Scoring")
         print(result)
 
+        # Creates a 2D linear space
+        # https://stackoverflow.com/questions/32208359/is-there-a-multi-dimensional-version-of-arange-linspace-in-numpy
+        x0, x1 = np.mgrid[0:10:250j, 0:10:250j]
+        # Making a list of pairs
+        X_image = np.vstack((x0.flatten(), x1.flatten())).T
+        y_image = regressor.predict(X_image)
+
+        plt.title("Image of prediction space")
+        plt.imshow(y_image.reshape((250, 250)).T)
+        plt.ylim(0, 250)
+        plt.xticks([0, 125, 250], [0, 0.5, 1.0])
+        plt.yticks([0, 125, 250], [0, 0.5, 1.0])
+        plt.xlabel("K2")
+        plt.ylabel("K3")
+        plt.show()
+
     plt.subplots_adjust(hspace=0.5)
 
     plt.subplot(2, 1, 1)
     plt.title("Real")
-    plt.scatter(X_train[:, 0], X_train[:, 1], c=(y_train[:, 0]))
+    plt.xlabel("K2")
+    plt.ylabel("K3")
+    plt.scatter(X_test[:, 0], X_test[:, 1], c=(y_test[:, 0]))
 
     plt.subplot(2, 1, 2)
     plt.title("Predicted")
+    plt.xlabel("K2")
+    plt.ylabel("K3")
     plt.scatter(X_test[:, 0], X_test[:, 1], c=y_pred)
 
     plt.show()
