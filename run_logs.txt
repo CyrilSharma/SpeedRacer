@@ -1,0 +1,10 @@
+For brute force calculation, seed=42, 2000 sets of parameters:
+[R^2 = 1; this is the baseline data]
+time = 9.54s (4.77s/1000)
+
+For random forest regression, seed=42, 500 sets of parameters:
+R^2 = 0.9869
+time = 0.00452s (0.00904s/1000)
+
+Speed difference:
+1/527x
