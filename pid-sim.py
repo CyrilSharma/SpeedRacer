@@ -18,7 +18,7 @@ def get_pid_runtime(k1, k2, k3):
     velocity = 0
     total_error = 0
     target_x = 400
-    error_history = collections.deque(maxlen=3)
+    error_history = []  # collections.deque(maxlen=30)
     eps = 0.001
     steps = 0
 
@@ -31,10 +31,11 @@ def get_pid_runtime(k1, k2, k3):
         error = target_x - x
         error_history.append(error)
         total_error += error
-        if len(error_history) == 3:
-            d_error = (error_history[2] - error_history[0]) / (2 * dt)
+        if len(error_history) >= 3:
+            d_error = (error_history[-1] - error_history[-3]) / (2 * dt)
         else:
             d_error = 0
+        # total_error = sum(error_history)
 
         hoped_velocity = k1 * error + k2 * total_error + k3 * d_error
         velocity += (hoped_velocity - velocity) * 0.5
@@ -61,8 +62,8 @@ def plot_random_sampling():
     result_values = []
     for i in range(1000):
         k1 = 1
-        k2 = np.random.rand() * 3
-        k3 = np.random.rand() * 3
+        k2 = np.random.rand() * 10
+        k3 = np.random.rand() * 10
         result_k2.append(k2)
         result_k3.append(k3)
         result_values.append(get_pid_runtime(k1, k2, k3))
