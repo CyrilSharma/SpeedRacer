@@ -1,11 +1,13 @@
 import numpy as np
+from lidar import read_lidar
 from world import World
 from agents import Car, RingBuilding, CircleBuilding, Painting, Pedestrian
 from geometry import Point
 import time
 from tkinter import *
+from graphics import Line as GraphicsLine, Point as GraphicsPoint, Rectangle as GraphicsRectangle
 
-human_controller = False
+human_controller = True
 
 dt = 0.1  # time steps in terms of seconds. In other words, 1/dt is the FPS.
 world_width = 120  # in meters
@@ -93,7 +95,42 @@ else:  # Let's use the keyboard input for human control
     for k in range(600):
         c1.set_control(controller.steering, controller.throttle)
         w.tick()  # This ticks the world for one time step (dt second)
+
+        n_divisions = 10
+
+        # CUSTOM CODE STARTS HERE
+        # Relative to the car, read the distances in each direction
+        # The indexes are sort of arbitrary
+        start = time.time()
+        lidar_measurements = read_lidar(w, c1, n_divisions)
+        end = time.time()
+
+        # (end - start) == ~0.02
+
+        min_lidar = min(lidar_measurements)
+        max_lidar = max(lidar_measurements)
+
+        for i in range(n_divisions):
+            start_x = int(640 / n_divisions * i)
+            end_x = int(640 / n_divisions * (i + 1))
+            start_y = 0
+            end_y = 10
+
+            img = GraphicsRectangle(GraphicsPoint(start_x, start_y), GraphicsPoint(
+                end_x, end_y))
+
+            red_color = int(255 - 255 * (lidar_measurements[i] - min_lidar) / (
+                max_lidar - min_lidar))
+
+            # Format {:.02X} does hex
+            img.setFill(f"#{red_color:02X}0000")
+            start = time.time()
+            img.draw(w.visualizer.win)
+            end = time.time()
+
+            # print(f"{(end - start) * n_divisions:.2f}")
         w.render()
+
         time.sleep(dt/4)  # Let's watch it 4x
         if w.collision_exists():
             import sys
