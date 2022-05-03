@@ -45,13 +45,25 @@ class Simulator:
         self.world = world
         self.car = car
         self.n_lidar_divisions = n_lidar_divisions
+        self.throttle = 0
+        self.steering = 0
 
         self.dt = world.dt
 
-    def step(self, forward_acceleration: float, steering_angle: float):
-        self.car.set_control(steering_angle, forward_acceleration)
+    def step(self, forward_or_backward, left_or_right):
+        if forward_or_backward == 0:
+            self.throttle += 1.5
+        else:
+            self.throttle -= 1.5
 
-        return self.get_state()
+        if left_or_right == 0:
+            self.steering += 0.5
+        else:
+            self.steering -= 0.5
+
+        self.car.set_control(self.steering, self.throttle)
+        self.world.tick()
+        self.car.tick(self.dt)
 
     def get_state(self):
         lidar_measurements = read_lidar(
@@ -104,8 +116,6 @@ def train(agent: RLCar, simulators: List[Simulator]):
             if collided:
                 break
 
-        print(it, runtime, total_distance)
-
         # Discount rewards and run backprop.
         optimizer.zero_grad()
 
@@ -144,6 +154,6 @@ if __name__ == "__main__":
 
         return Simulator(CircularWorld, car, 64)
 
-    trained_agent = train(agent, [get_simulator() for _ in range(100)])
+    trained_agent = train(agent, [get_simulator() for _ in range(1000)])
 
     torch.save(trained_agent.state_dict(), "trained_agent.pt")
