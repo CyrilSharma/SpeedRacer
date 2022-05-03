@@ -15,6 +15,8 @@ def get_first_collision_n(center: Point, world: World, dx, dy, maximum):
             if obstacle.collidable and obstacle.obj.intersectsWith(line):
                 return i
 
+    return maximum
+
 
 dx = []
 dy = []

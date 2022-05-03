@@ -114,7 +114,7 @@ else:  # Let's use the keyboard input for human control
             start_x = int(640 / n_divisions * i)
             end_x = int(640 / n_divisions * (i + 1))
             start_y = 0
-            end_y = 10
+            end_y = 100
 
             img = GraphicsRectangle(GraphicsPoint(start_x, start_y), GraphicsPoint(
                 end_x, end_y))
@@ -131,7 +131,7 @@ else:  # Let's use the keyboard input for human control
             # print(f"{(end - start) * n_divisions:.2f}")
         w.render()
 
-        time.sleep(dt/4)  # Let's watch it 4x
+        # time.sleep(dt/4)  # Let's watch it 4x
         if w.collision_exists():
             import sys
             sys.exit(0)
