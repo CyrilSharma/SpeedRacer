@@ -8,7 +8,7 @@ from world import World
 from agents import Car
 from lidar import read_lidar
 
-#import cv2
+import cv2
 
 
 class RLCar(nn.Module):
@@ -23,8 +23,8 @@ class RLCar(nn.Module):
 
         # self.flatten = nn.Flatten()
 
-        self.fc1 = nn.Linear(input_size + 2, 128)
-        self.fc2 = nn.Linear(128, 16)
+        self.fc1 = nn.Linear(input_size + 2, 64)
+        self.fc2 = nn.Linear(64, 16)
         self.fc3 = nn.Linear(16, 16)
 
         # Forward/backward, left/right
@@ -36,7 +36,7 @@ class RLCar(nn.Module):
         # x = self.flatten(x)
         x = F.relu(self.fc1(x.type(torch.float)))
         x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
+       # x = F.relu(self.fc3(x))
         x = F.sigmoid(self.output(x))
 
         return x
@@ -83,7 +83,8 @@ def train(agent: RLCar, simulators: List[Simulator]):
     eps_greedy = 0.1
 
     gamma = 0.7
-    optimizer = torch.optim.Adam(agent.parameters(), lr=0.03)
+    optimizer = torch.optim.Adam(agent.parameters(), lr=0.01)
+    turnsZero = 0
     for it, simulator in enumerate(simulators):
         # Run simulation.
         # Array of (state, action, reward, next_state)
@@ -107,10 +108,10 @@ def train(agent: RLCar, simulators: List[Simulator]):
             canvas[:] = 0
             center = simulator.car.center
             x, y = center.x, center.y
-            #cv2.circle(canvas, (int(x), int(y)), 5, (255, 255, 255), -1)
+            cv2.circle(canvas, (int(x), int(y)), 5, (255, 255, 255), -1)
 
-            #cv2.imshow("Car", canvas)
-            #cv2.waitKey(1)
+            cv2.imshow("Car", canvas)
+            cv2.waitKey(1)
 
             was_random = torch.rand(1) < eps_greedy * (np.exp(-runtime / 1000))
 
@@ -125,23 +126,25 @@ def train(agent: RLCar, simulators: List[Simulator]):
 
             end = False
 
-            reward = -1 + simulator.car.velocity.norm()
-
+            reward = simulator.car.velocity.norm()
+            if reward == 0:
+                turnsZero+=1
+            else:
+                turnsZero = 0
             # reward = 5 - max(simulator.car.velocity.norm() - 5, 0)
-
             if simulator.collided():
                 print(it, "Collided after", runtime, "steps")
                 end = True
                 reward += -100
-            if simulator.car.velocity.norm() == 0:
+            if turnsZero > 50:
                 print(it, "Stopped after", runtime, "steps")
-                reward += -50
+                reward += -100
                 end = True
 
             next_state = simulator.get_state()
 
             if not was_random:
-                history.append((state, action, reward, next_state))
+                history.append((state, processed_state, action, reward, next_state))
 
             if end:
                 break
@@ -158,21 +161,23 @@ def train(agent: RLCar, simulators: List[Simulator]):
         running_reward = 0
         discounted_rewards = []
         for i in range(len(history) - 1, -1, -1):
-            state, action, reward, next_state = history[i]
+            state, processed_state, action, reward, next_state = history[i]
             running_reward = running_reward * gamma + reward
             discounted_rewards.append(running_reward)
 
         discounted_rewards = discounted_rewards[::-1]
-        discounted_rewards = (
-            discounted_rewards - np.mean(discounted_rewards)) / np.std(discounted_rewards)
-
+       # discounted_rewards = (
+       #     discounted_rewards - np.mean(discounted_rewards)) / np.std(discounted_rewards)
+       # print("actions: ", [x[2] for x in history], "r: ", [x[3] for x in history], "rewards:", discounted_rewards)
         for i in range(len(history)):
-            state, action, reward, next_state = history[i]
+            state, processed_state, action, reward, next_state = history[i]
 
             discounted_reward = discounted_rewards[i]
 
             eps = 1e-5
 
+            action = agent(processed_state)[0]
+            #print(action)
             if action[0] > 0.5:
                 highest_p_fb = -torch.log(action[0] + eps)
             else:
