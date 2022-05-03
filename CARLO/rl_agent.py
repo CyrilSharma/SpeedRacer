@@ -23,7 +23,7 @@ class RLCar(nn.Module):
 
         # self.flatten = nn.Flatten()
 
-        self.fc1 = nn.Linear(input_size, 128)
+        self.fc1 = nn.Linear(input_size + 2, 128)
         self.fc2 = nn.Linear(128, 16)
         self.fc3 = nn.Linear(16, 16)
 
@@ -94,7 +94,13 @@ def train(agent: RLCar, simulators: List[Simulator]):
 
             total_distance += simulator.car.velocity.norm()
 
-            processed_state = 1 / (torch.tensor([state]) + 1)
+            velocity_tensor = torch.tensor(
+                [simulator.car.velocity.x, simulator.car.velocity.y])
+
+            lidar_tensor = 1 / (torch.tensor(state) + 1)
+
+            processed_state = torch.cat(
+                [velocity_tensor, lidar_tensor]).unsqueeze(0)
 
             action = agent(processed_state)[0]
 
@@ -121,11 +127,14 @@ def train(agent: RLCar, simulators: List[Simulator]):
 
             reward = -1 + simulator.car.velocity.norm()
 
+            # reward = 5 - max(simulator.car.velocity.norm() - 5, 0)
+
             if simulator.collided():
                 print(it, "Collided after", runtime, "steps")
                 end = True
                 reward += -100
             if simulator.car.velocity.norm() == 0:
+                print(it, "Stopped after", runtime, "steps")
                 reward += -50
                 end = True
 
@@ -141,7 +150,6 @@ def train(agent: RLCar, simulators: List[Simulator]):
                   "steps and travelled", total_distance, "m")
 
         print(" - Final car velocity:", simulator.car.velocity.norm())
-        print(" - Example output:", action)
 
         # Discount rewards and run backprop.
         optimizer.zero_grad()
