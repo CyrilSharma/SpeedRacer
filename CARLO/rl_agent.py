@@ -8,7 +8,7 @@ from world import World
 from agents import Car
 from lidar import read_lidar
 
-import cv2
+#import cv2
 
 
 class RLCar(nn.Module):
@@ -34,7 +34,7 @@ class RLCar(nn.Module):
         # x = F.relu(self.conv1(x))
         # x = F.relu(self.conv2(x))
         # x = self.flatten(x)
-        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc1(x.type(torch.float)))
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
         x = F.sigmoid(self.output(x))
@@ -107,10 +107,10 @@ def train(agent: RLCar, simulators: List[Simulator]):
             canvas[:] = 0
             center = simulator.car.center
             x, y = center.x, center.y
-            cv2.circle(canvas, (int(x), int(y)), 5, (255, 255, 255), -1)
+            #cv2.circle(canvas, (int(x), int(y)), 5, (255, 255, 255), -1)
 
-            cv2.imshow("Car", canvas)
-            cv2.waitKey(1)
+            #cv2.imshow("Car", canvas)
+            #cv2.waitKey(1)
 
             was_random = torch.rand(1) < eps_greedy * (np.exp(-runtime / 1000))
 
