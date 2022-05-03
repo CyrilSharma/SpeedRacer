@@ -66,12 +66,15 @@ class Simulator:
 def train(agent: RLCar, simulators: List[Simulator]):
     gamma = 0.7
     optimizer = torch.optim.Adam(agent.parameters(), lr=0.001)
-    for simulator in simulators:
+    for it, simulator in enumerate(simulators):
         # Run simulation.
         # Array of (state, action, reward, next_state)
         history = []
-        for _ in range(100):
+        total_distance = 0
+        for runtime in range(1000):
             state = simulator.get_state()
+
+            total_distance += simulator.car.velocity.norm()
 
             processed_state = torch.tensor([state]) / 100
 
@@ -80,6 +83,7 @@ def train(agent: RLCar, simulators: List[Simulator]):
             forward_or_backward = torch.argmax(action[:2])
             left_or_right = torch.argmax(action[2:])
 
+            # THIS NEEDS TO BE FIXED
             simulator.step(forward_or_backward, left_or_right)
 
             # Q(s, a) = r + gamma * max_a' Q(s', a')
@@ -89,6 +93,7 @@ def train(agent: RLCar, simulators: List[Simulator]):
 
             prev_reward = simulator.car.velocity.norm()
             if simulator.collided():
+                print("Collided!")
                 collided = True
                 prev_reward += -100
 
@@ -98,6 +103,8 @@ def train(agent: RLCar, simulators: List[Simulator]):
 
             if collided:
                 break
+
+        print(it, runtime, total_distance)
 
         # Discount rewards and run backprop.
         optimizer.zero_grad()
@@ -115,9 +122,11 @@ def train(agent: RLCar, simulators: List[Simulator]):
             loss = highest_p_fb * reward + highest_p_lr * reward
             loss.backward()
 
-        print(loss)
+        print(it, loss)
 
         optimizer.step()
+
+    return agent
 
 
 if __name__ == "__main__":
@@ -127,9 +136,14 @@ if __name__ == "__main__":
     from geometry import Point
     import numpy as np
 
-    # A Car object is a dynamic object -- it can move. We construct it using its center location and heading angle.
-    car = Car(Point(91.75, 60), np.pi/2)
-    car.max_speed = 30.0  # let's say the maximum is 30 m/s (108 km/h)
-    car.velocity = Point(0, 3.0)
+    def get_simulator():
+        # A Car object is a dynamic object -- it can move. We construct it using its center location and heading angle.
+        car = Car(Point(91.75, 60), np.pi/2)
+        car.max_speed = 30.0  # let's say the maximum is 30 m/s (108 km/h)
+        car.velocity = Point(0, 3.0)
 
-    train(agent, [Simulator(CircularWorld, car, 64)] * 100)
+        return Simulator(CircularWorld, car, 64)
+
+    trained_agent = train(agent, [get_simulator() for _ in range(100)])
+
+    torch.save(trained_agent.state_dict(), "trained_agent.pt")
