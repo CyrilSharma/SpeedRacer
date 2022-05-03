@@ -88,7 +88,7 @@ def train(agent: RLCar, simulators: List[Simulator]):
 
             total_distance += simulator.car.velocity.norm()
 
-            processed_state = torch.tensor([state]) / 100
+            processed_state = 1 / (torch.tensor([state]) + 1)
 
             action = agent(processed_state)[0]
 
@@ -103,22 +103,28 @@ def train(agent: RLCar, simulators: List[Simulator]):
 
             collided = False
 
-            prev_reward = simulator.car.velocity.norm()
+            reward = -1 + simulator.car.velocity.norm()
             if simulator.collided():
-                print("Collided!")
+                print(it, "Collided after", runtime, "steps")
                 collided = True
-                prev_reward += -100
+                reward += -10
 
             next_state = simulator.get_state()
 
-            history.append((state, action, prev_reward, next_state))
+            history.append((state, action, reward, next_state))
 
             if collided:
                 break
+        else:
+            print(it, "Finished after", runtime,
+                  "steps and travelled", total_distance, "m")
+
+        print(" - Final car velocity:", simulator.car.velocity.norm())
 
         # Discount rewards and run backprop.
         optimizer.zero_grad()
 
+        total_loss = 0
         running_reward = 0
         for i in range(len(history) - 1, -1, -1):
             state, action, reward, next_state = history[i]
@@ -126,13 +132,15 @@ def train(agent: RLCar, simulators: List[Simulator]):
 
             eps = 1e-5
 
-            highest_p_fb = torch.log(torch.max(action[:2]) + eps)
-            highest_p_lr = torch.log(torch.max(action[2:]) + eps)
+            highest_p_fb = -torch.log(torch.max(action[:2]) + eps)
+            highest_p_lr = -torch.log(torch.max(action[2:]) + eps)
 
             loss = highest_p_fb * reward + highest_p_lr * reward
             loss.backward()
 
-        print(it, loss)
+            total_loss += loss.item()
+
+        print(it, total_loss, loss)
 
         optimizer.step()
 
