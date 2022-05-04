@@ -10,7 +10,7 @@ from world import World
 from agents import Car
 from lidar import read_lidar
 
-#import cv2
+import cv2
 
 
 class RLCar(nn.Module):
