@@ -12,8 +12,10 @@ import torch.optim
 from agents import Car
 from entities import RectangleEntity
 from example_circularroad import create_circular_world
+from example_intersection import create_intersection_world
 from geometry import Point
-from lidar import read_lidar
+from graphics import Line as GLine, Point as GPoint
+from lidar import read_lidar, get_first_collision_n
 from world import World
 
 
@@ -60,55 +62,93 @@ class Simulator:
         self.steering = 0
 
         self.world = None
+        self.visited_grid_tiles = set()
+        self.timestep = 0
+        self.stopped_at_timestep = None
+
+        self.stop_patience = 10
+
+    def car_location_to_grid_tile(self, x: float, y: float):
+        return (int(x), int(y))
 
     def reset(self):
         if self.world:
             self.world.close()
 
-        car = Car(Point(93, 60), np.pi/2)
+        car = Car(CAR_START, np.pi/2)
         car.max_speed = 30.0  # let's say the maximum is 30 m/s (108 km/h)
         car.velocity = Point(0.0, 1.0)
         self.car = car
         self.world = self.world_factory()
         self.world.add(self.car)
+        self.visited_grid_tiles = set()
+        self.timestep = 0
+        self.stopped_at_timestep = None
+        self.throttle = 0
+        self.steering = 0
 
     def step(self, action: int):
         if action in [0, 1, 2]:
-            self.throttle += 1.5 * self.world.dt
+            # self.throttle += 0.5  # * self.world.dt
+            self.throttle = +1  # * self.world.dt
         elif action in [3, 4, 5]:
-            self.throttle -= 1.5 * self.world.dt
+            # self.throttle -= 0.5  # * self.world.dt
+            self.throttle = -1  # * self.world.dt
 
         if action in [0, 6, 3]:
-            self.steering += 1 * self.world.dt
+            # self.steering += 0.05  # 1 * self.world.dt
+            self.steering = +0.2  # 1 * self.world.dt
         elif action in [2, 7, 5]:
-            self.steering -= 1 * self.world.dt
+            # self.steering -= 0.05  # 1 * self.world.dt
+            self.steering = -0.2  # 1 * self.world.dt
 
         self.car.set_control(self.steering, self.throttle)
         self.world.tick()
         self.car.tick(self.world.dt)
 
+        self.timestep += 1
+
+        if self.car.velocity.norm() == 0:
+            if self.stopped_at_timestep is None:
+                self.stopped_at_timestep = self.timestep
+        else:
+            self.stopped_at_timestep = None
+
         reward = 0
         done = False
 
+        # Reward exploration
+        grid_tile = self.car_location_to_grid_tile(self.car.x, self.car.y)
+        if grid_tile not in self.visited_grid_tiles:
+            reward += 1
+        self.visited_grid_tiles.add(grid_tile)
+
+        # Penalty for simply existing
+        reward += -0.1
+
+        # Penalty for being close to a wall
+        reward += (self.get_state()[:-2].min().item())
+
         if self.world.collision_exists():
-            reward = -10
-            print("Strong negative reward from collision")
-            done = True
-        elif self.car.velocity.norm() == 0:
-            reward = -1
-            print("Strong negative reward from stopping")
+            reward += -1
+            # print("Strong negative reward from collision")
             done = True
         else:
+            if self.stopped_at_timestep is not None and self.timestep - self.stopped_at_timestep > self.stop_patience:
+                # print("Strong negative reward for stopping")
+                reward += -1
+                done = True
+
             # state: Closer -> 1, further -> 0
             # reward is cross product of vector from center of circle with velocity
             # world width and height are 60
             cx, cy = self.car.center.x - 60, self.car.center.y - 60
             vx, vy = self.car.velocity.x, self.car.velocity.y
 
-            reward = (
-                ((cx * vy) - (cy * vx)) / (cx * cx + cy * cy) ** 0.5) ** 1/3
-            done = False
-            print("Reward for time step:", reward)
+            # reward = (
+            #     ((cx * vy) - (cy * vx)) / (cx * cx + cy * cy) ** 0.5) ** 1/3
+            # done = False
+            # print("Reward for time step:", reward)
 
         return reward, done
 
@@ -117,13 +157,14 @@ class Simulator:
             self.world, self.car, self.n_lidar_divisions)
 
         # Keep value between 0 and 1
+        # The smaller the distance, the smaller the value
         lidar_measurements_normalized = 1 / \
             (1 + torch.tensor(lidar_measurements))
 
         # velocity_tensor = torch.tensor(
         #     [simulator.car.velocity.x, simulator.car.velocity.y])
         velocity_tensor = torch.tensor(
-            [self.car.velocity.norm(), self.car.angular_velocity])
+            [1-1/(1+self.car.velocity.norm()), self.car.angular_velocity])
 
         # Combine lidar measurements and car kinematics
         combined = torch.cat([lidar_measurements_normalized, velocity_tensor])
@@ -217,7 +258,7 @@ def train(simulators: List[Simulator], input_size: int):
         # (a final state would've been the one after which simulation ended)
         # A final state has .next_state is None == True.
         non_final_mask = torch.tensor(tuple(map(lambda s: s is not None,
-                                            batch.next_state)), device=device, dtype=torch.bool)
+                                                batch.next_state)), device=device, dtype=torch.bool)
         non_final_next_states = torch.stack([s for s in batch.next_state
                                              if s is not None])
         state_batch = torch.stack(batch.state)
@@ -273,15 +314,55 @@ def train(simulators: List[Simulator], input_size: int):
         simulator.reset()
         total_distance = 0
         total_reward = 0
+        prev_lines = []
         for t in range(1000):
+            for line in prev_lines:
+                line.undraw()
+            prev_lines = []
+
             state = simulator.get_state()
 
             if (i_episode % RENDER_EPISODE) == 0:
                 simulator.world.render()
 
+            c = simulator.car
+            w = simulator.world
+            v = w.visualizer
+            for i, angle in enumerate(np.linspace(c.heading, c.heading + 2 * np.pi, INPUT_SIZE + 1)[:-1]):
+                if not(i == 2 or i == INPUT_SIZE - 2):
+                    continue
+                dx = np.cos(angle) * 0.1
+                dy = np.sin(angle) * 0.1
+                distance = get_first_collision_n(
+                    c.center, simulator.world, dx, dy, 1000)
+                ppm = 6
+                L = GLine(GPoint(ppm*c.x, v.display_height - ppm*c.y), GPoint(
+                    ppm*(c.x + distance * dx * 10), v.display_height - ppm*(c.y + distance * dy * 10)))
+
+                L.setFill(f"#{int(255 * i/INPUT_SIZE):02X}0000")
+                L.draw(simulator.world.visualizer.win)
+                prev_lines.append(L)
+
+            v.win.flush()
+
             EPS_STEPS += 1
             eps = EPS_END + (EPS_START - EPS_END) * np.exp(-t / EPS_STEPS)
             action = select_action(state, eps)
+
+            action = 1
+            if state[2] > state[-4]:
+                action = 2
+            else:
+                action = 0
+            # print(state[1], state[-3])
+            # if state[1] < 0.1:
+            #     action = 2
+            # elif state[-2 - 1] < 0.5:
+            #     action = 0
+
+            action = torch.tensor([action])
+
+            # action = torch.tensor([0 if t % 2 == 0 else 1])
 
             reward, done = simulator.step(action)
             total_reward += reward
@@ -326,15 +407,18 @@ def train(simulators: List[Simulator], input_size: int):
     return policy_net
 
 
-INPUT_SIZE = 60
+INPUT_SIZE = 20
+CAR_START = Point(93, 60)
+# CAR_START = Point(20, 20)
 
 
 def get_simulator():
     # A Car object is a dynamic object -- it can move. We construct it using its center location and heading angle.
-    car = Car(Point(91.75, 60), np.pi/2)
+    car = Car(CAR_START, np.pi/2)
     car.max_speed = 30.0  # let's say the maximum is 30 m/s (108 km/h)
     car.velocity = Point(0.0, 1.0)
 
+    # return Simulator(create_intersection_world, car, INPUT_SIZE)
     return Simulator(create_circular_world, car, INPUT_SIZE)
 
 

@@ -9,11 +9,12 @@ import numpy as np
 
 
 def get_first_collision_n(center: Point, world: World, dx, dy, maximum):
+    d = (dx ** 2 + dy ** 2) ** 0.5
     for i in range(1, maximum):
         line = Line(center, Point(center.x + dx * i, center.y + dy * i))
         for obstacle in world.static_agents:
             if obstacle.collidable and obstacle.obj.intersectsWith(line):
-                return i
+                return i * d
 
     return maximum
 
@@ -28,10 +29,10 @@ for angle in np.linspace(0, 2 * np.pi, 200):
 
 def read_lidar(w: World, c: Car, n_divisions: int):
     distances = []
-    for angle in np.linspace(c.heading, c.heading + 2 * np.pi, n_divisions):
-        dx = np.cos(angle)
-        dy = np.sin(angle)
-        distance = get_first_collision_n(c.center, w, dx, dy, 100)
+    for angle in np.linspace(c.heading, c.heading + 2 * np.pi, n_divisions + 1)[:-1]:
+        dx = np.cos(angle) * 0.1
+        dy = np.sin(angle) * 0.1
+        distance = get_first_collision_n(c.center, w, dx, dy, 1000)
         distances.append(distance)
 
     return distances
