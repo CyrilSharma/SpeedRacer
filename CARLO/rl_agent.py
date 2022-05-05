@@ -1,16 +1,20 @@
-from collections import deque, namedtuple
 import random
-from typing import List
-import torch
-import torch.optim
-import torch.nn as nn
-import torch.nn.functional as F
-
-from world import World
-from agents import Car
-from lidar import read_lidar
+from collections import deque, namedtuple
+from typing import Callable, List
 
 import cv2
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim
+
+from agents import Car
+from entities import RectangleEntity
+from example_circularroad import create_circular_world
+from geometry import Point
+from lidar import read_lidar
+from world import World
 
 
 class RLCar(nn.Module):
@@ -25,7 +29,8 @@ class RLCar(nn.Module):
 
         # self.flatten = nn.Flatten()
 
-        self.fc1 = nn.Linear(input_size + 1, 128)
+        # One for speed, one for angular velocity
+        self.fc1 = nn.Linear(input_size + 2, 128)
         self.fc2 = nn.Linear(128, 16)
         self.fc3 = nn.Linear(16, 16)
 
@@ -39,14 +44,14 @@ class RLCar(nn.Module):
         x = F.relu(self.fc1(x.type(torch.float)))
         x = F.relu(self.fc2(x))
         x = F.relu(self.fc3(x))
-        x = torch.sigmoid(self.output(x))
+        x = F.softmax(self.output(x), dim=-1)
 
         return x
 
 
 class Simulator:
-    def __init__(self, world: World, car: Car, n_lidar_divisions: int):
-        self.world = world
+    def __init__(self, world_factory: Callable[[], World], car: Car, n_lidar_divisions: int):
+        self.world_factory = world_factory
         self.car = car
         self.car_initial_state = (
             car.center, car.velocity, car.acceleration, car.angular_velocity)
@@ -54,36 +59,56 @@ class Simulator:
         self.throttle = 0
         self.steering = 0
 
-        self.dt = world.dt
+        self.world = None
 
     def reset(self):
-        self.car.center, self.car.velocity, self.car.acceleration, self.car.angular_velocity = self.car_initial_state
-        self.world.reset()
+        if self.world:
+            self.world.close()
+
+        car = Car(Point(93, 60), np.pi/2)
+        car.max_speed = 30.0  # let's say the maximum is 30 m/s (108 km/h)
+        car.velocity = Point(0.0, 1.0)
+        self.car = car
+        self.world = self.world_factory()
+        self.world.add(self.car)
 
     def step(self, action: int):
         if action in [0, 1, 2]:
-            self.throttle += 1.5
+            self.throttle += 1.5 * self.world.dt
         elif action in [3, 4, 5]:
-            self.throttle -= 1.5
+            self.throttle -= 1.5 * self.world.dt
 
         if action in [0, 6, 3]:
-            self.steering += 0.5
+            self.steering += 1 * self.world.dt
         elif action in [2, 7, 5]:
-            self.steering -= 0.5
+            self.steering -= 1 * self.world.dt
 
         self.car.set_control(self.steering, self.throttle)
         self.world.tick()
-        self.car.tick(self.dt)
+        self.car.tick(self.world.dt)
 
         reward = 0
         done = False
 
-        if self.world.collision_exists(self.car):
+        if self.world.collision_exists():
             reward = -10
+            print("Strong negative reward from collision")
+            done = True
+        elif self.car.velocity.norm() == 0:
+            reward = -1
+            print("Strong negative reward from stopping")
             done = True
         else:
-            reward = self.car.velocity.norm()
+            # state: Closer -> 1, further -> 0
+            # reward is cross product of vector from center of circle with velocity
+            # world width and height are 60
+            cx, cy = self.car.center.x - 60, self.car.center.y - 60
+            vx, vy = self.car.velocity.x, self.car.velocity.y
+
+            reward = (
+                ((cx * vy) - (cy * vx)) / (cx * cx + cy * cy) ** 0.5) ** 1/3
             done = False
+            print("Reward for time step:", reward)
 
         return reward, done
 
@@ -98,7 +123,7 @@ class Simulator:
         # velocity_tensor = torch.tensor(
         #     [simulator.car.velocity.x, simulator.car.velocity.y])
         velocity_tensor = torch.tensor(
-            [self.car.velocity.norm()])
+            [self.car.velocity.norm(), self.car.angular_velocity])
 
         # Combine lidar measurements and car kinematics
         combined = torch.cat([lidar_measurements_normalized, velocity_tensor])
@@ -154,8 +179,8 @@ def train(simulators: List[Simulator], input_size: int):
     target_net.eval()
 
     memory = ReplayMemory(10000)
-    BATCH_SIZE = 128
-    GAMMA = 0.999
+    BATCH_SIZE = 12
+    GAMMA = 0.5
     TARGET_UPDATE = 10
     EPS_START = 0.9
     EPS_END = 0.05
@@ -199,9 +224,6 @@ def train(simulators: List[Simulator], input_size: int):
         action_batch = torch.stack(batch.action)
         reward_batch = torch.tensor(batch.reward).view(-1, 1)
 
-        # print(state_batch.shape, action_batch.shape, reward_batch.shape)
-        # print(non_final_next_states)
-
         # Compute Q(s_t, a) - the model computes Q(s_t), then we select the
         # columns of actions taken. These are the actions which would've been taken
         # for each batch state according to policy_net
@@ -235,9 +257,9 @@ def train(simulators: List[Simulator], input_size: int):
             param.grad.data.clamp_(-1, 1)
         optimizer.step()
 
-    # canvas = np.zeros((400, 400, 3), dtype=np.uint8)
+    canvas = np.zeros((400, 400, 3), dtype=np.uint8)
 
-    optimizer = torch.optim.Adam(policy_net.parameters(), lr=0.03)
+    optimizer = torch.optim.Adam(policy_net.parameters(), lr=0.0001)
 
     num_episodes = 2500
 
@@ -245,17 +267,24 @@ def train(simulators: List[Simulator], input_size: int):
 
     simulator = simulators[0]
 
+    RENDER_EPISODE = 1
+
     for i_episode in range(num_episodes):
         simulator.reset()
         total_distance = 0
+        total_reward = 0
         for t in range(1000):
             state = simulator.get_state()
+
+            if (i_episode % RENDER_EPISODE) == 0:
+                simulator.world.render()
 
             EPS_STEPS += 1
             eps = EPS_END + (EPS_START - EPS_END) * np.exp(-t / EPS_STEPS)
             action = select_action(state, eps)
 
             reward, done = simulator.step(action)
+            total_reward += reward
             if not done:
                 next_state = simulator.get_state()
             else:
@@ -263,14 +292,24 @@ def train(simulators: List[Simulator], input_size: int):
 
             memory.push(state, action, next_state, reward)
 
-            total_distance += simulator.car.velocity.norm()
+            total_distance += simulator.car.velocity.norm() * simulator.world.dt
+
+            # print(t, total_distance)
+            canvas[:] = 0
+            car_pos = simulator.car.center
+            cv2.circle(canvas, (int(car_pos.x * 400/120), int(car_pos.y * 400/120)),
+                       5, (0, 0, 255), -1)
+            cv2.imshow('canvas', canvas[::-1])
+
+            if cv2.waitKey(1) == ord('q'):
+                exit()
 
             optimize_model()
             if done:
-                print(i_episode, total_distance)
+                print(i_episode, t, total_distance, total_reward)
                 break
 
-        distance_history.append(total_distance)
+        distance_history.append(t)
 
         # Update the target network, copying all weights and biases in DQN
         if i_episode % TARGET_UPDATE == 0:
@@ -287,22 +326,21 @@ def train(simulators: List[Simulator], input_size: int):
     return policy_net
 
 
+INPUT_SIZE = 60
+
+
+def get_simulator():
+    # A Car object is a dynamic object -- it can move. We construct it using its center location and heading angle.
+    car = Car(Point(91.75, 60), np.pi/2)
+    car.max_speed = 30.0  # let's say the maximum is 30 m/s (108 km/h)
+    car.velocity = Point(0.0, 1.0)
+
+    return Simulator(create_circular_world, car, INPUT_SIZE)
+
+
 if __name__ == "__main__":
     # agent = RLCar(input_size=64)
 
-    from example_circularroad import w as CircularWorld
-    from geometry import Point
-    import numpy as np
-
-    def get_simulator():
-        # A Car object is a dynamic object -- it can move. We construct it using its center location and heading angle.
-        car = Car(Point(91.75, 60), np.pi/2)
-        car.max_speed = 30.0  # let's say the maximum is 30 m/s (108 km/h)
-        car.velocity = Point(0.0, 1.0)
-
-        return Simulator(CircularWorld, car, 64)
-
-    trained_agent = train([get_simulator()
-                          for _ in range(1000)], input_size=64)
+    trained_agent = train([get_simulator()], input_size=INPUT_SIZE)
 
     torch.save(trained_agent.state_dict(), "trained_agent.pt")
