@@ -9,7 +9,7 @@ from graphics import Line as GraphicsLine, Point as GraphicsPoint, Rectangle as 
 
 human_controller = True
 
-dt = 0.1  # time steps in terms of seconds. In other words, 1/dt is the FPS.
+dt = 1  # time steps in terms of seconds. In other words, 1/dt is the FPS.
 world_width = 120  # in meters
 world_height = 120
 inner_building_radius = 30

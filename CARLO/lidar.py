@@ -35,3 +35,9 @@ def read_lidar(w: World, c: Car, n_divisions: int):
         distances.append(distance)
 
     return distances
+
+def get_distance(w: World, c: Car):
+    dx = np.cos(c.heading)
+    dy = np.sin(c.heading)
+    distance = get_first_collision_n(c.center, w, dx, dy, 100)
+    return distance
