@@ -18,21 +18,27 @@ lane_marker_width = 0.5
 num_of_lane_markers = 50
 lane_width = 3.5
 
-# The world is 120 meters by 120 meters. ppm is the pixels per meter.
-w = World(dt, width=world_width, height=world_height, ppm=6)
+
+def create_circular_world():
+    # The world is 120 meters by 120 meters. ppm is the pixels per meter.
+    w = World(dt, width=world_width, height=world_height, ppm=6)
+
+    # Let's add some sidewalks and RectangleBuildings.
+    # A Painting object is a rectangle that the vehicles cannot collide with. So we use them for the sidewalks / zebra crossings / or creating lanes.
+    # A CircleBuilding or RingBuilding object is also static -- they do not move. But as opposed to Painting, they can be collided with.
+
+    # To create a circular road, we will add a CircleBuilding and then a RingBuilding around it
+    cb = CircleBuilding(Point(world_width/2, world_height/2),
+                        inner_building_radius, 'gray80')
+    w.add(cb)
+    rb = RingBuilding(Point(world_width/2, world_height/2), inner_building_radius + num_lanes * lane_width +
+                      (num_lanes - 1) * lane_marker_width, 1+np.sqrt((world_width/2)**2 + (world_height/2)**2), 'gray80')
+    w.add(rb)
+
+    return w
 
 
-# Let's add some sidewalks and RectangleBuildings.
-# A Painting object is a rectangle that the vehicles cannot collide with. So we use them for the sidewalks / zebra crossings / or creating lanes.
-# A CircleBuilding or RingBuilding object is also static -- they do not move. But as opposed to Painting, they can be collided with.
-
-# To create a circular road, we will add a CircleBuilding and then a RingBuilding around it
-cb = CircleBuilding(Point(world_width/2, world_height/2),
-                    inner_building_radius, 'gray80')
-w.add(cb)
-rb = RingBuilding(Point(world_width/2, world_height/2), inner_building_radius + num_lanes * lane_width +
-                  (num_lanes - 1) * lane_marker_width, 1+np.sqrt((world_width/2)**2 + (world_height/2)**2), 'gray80')
-w.add(rb)
+w = create_circular_world()
 
 # Let's also add some lane markers on the ground. This is just decorative. Because, why not.
 for lane_no in range(num_lanes - 1):
