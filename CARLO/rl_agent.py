@@ -1,5 +1,6 @@
 import random
 from collections import deque, namedtuple
+import time
 from typing import Callable, List
 
 import cv2
@@ -32,9 +33,9 @@ class RLCar(nn.Module):
         # self.flatten = nn.Flatten()
 
         # One for speed, one for angular velocity
-        self.fc1 = nn.Linear(input_size + 2, 128)
-        self.fc2 = nn.Linear(128, 16)
-        self.fc3 = nn.Linear(16, 16)
+        self.fc1 = nn.Linear(input_size + 2, 16)
+        self.fc2 = nn.Linear(16, 16)
+        # self.fc3 = nn.Linear(16, 16)
 
         # Forward/backward, left/right
         self.output = nn.Linear(16, n_actions)
@@ -45,7 +46,7 @@ class RLCar(nn.Module):
         # x = self.flatten(x)
         x = F.relu(self.fc1(x.type(torch.float)))
         x = F.relu(self.fc2(x))
-        x = F.relu(self.fc3(x))
+        # x = F.relu(self.fc3(x))
         x = F.softmax(self.output(x), dim=-1)
 
         return x
@@ -72,8 +73,8 @@ class Simulator:
         return (int(x), int(y))
 
     def reset(self):
-        if self.world:
-            self.world.close()
+        # if self.world:
+        #     self.world.close()
 
         car = Car(CAR_START, np.pi/2)
         car.max_speed = 30.0  # let's say the maximum is 30 m/s (108 km/h)
@@ -90,10 +91,10 @@ class Simulator:
     def step(self, action: int):
         if action in [0, 1, 2]:
             # self.throttle += 0.5  # * self.world.dt
-            self.throttle = +1  # * self.world.dt
+            self.throttle = +0.5  # * self.world.dt
         elif action in [3, 4, 5]:
             # self.throttle -= 0.5  # * self.world.dt
-            self.throttle = -1  # * self.world.dt
+            self.throttle = -0.5  # * self.world.dt
 
         if action in [0, 6, 3]:
             # self.steering += 0.05  # 1 * self.world.dt
@@ -120,30 +121,30 @@ class Simulator:
         # Reward exploration
         grid_tile = self.car_location_to_grid_tile(self.car.x, self.car.y)
         if grid_tile not in self.visited_grid_tiles:
-            reward += 1
+            reward += 10
         self.visited_grid_tiles.add(grid_tile)
 
         # Penalty for simply existing
         reward += -0.1
 
         # Penalty for being close to a wall
-        reward += (self.get_state()[:-2].min().item())
+        reward -= (self.get_state()[:-2].max().item())
 
         if self.world.collision_exists():
             reward += -1
-            # print("Strong negative reward from collision")
+            print("Car crashed")
             done = True
         else:
             if self.stopped_at_timestep is not None and self.timestep - self.stopped_at_timestep > self.stop_patience:
-                # print("Strong negative reward for stopping")
+                print("Car stopped")
                 reward += -1
                 done = True
 
             # state: Closer -> 1, further -> 0
             # reward is cross product of vector from center of circle with velocity
             # world width and height are 60
-            cx, cy = self.car.center.x - 60, self.car.center.y - 60
-            vx, vy = self.car.velocity.x, self.car.velocity.y
+            # cx, cy = self.car.center.x - 60, self.car.center.y - 60
+            # vx, vy = self.car.velocity.x, self.car.velocity.y
 
             # reward = (
             #     ((cx * vy) - (cy * vx)) / (cx * cx + cy * cy) ** 0.5) ** 1/3
@@ -278,6 +279,7 @@ def train(simulators: List[Simulator], input_size: int):
         next_state_values = torch.zeros(BATCH_SIZE, device=device)
         next_state_values[non_final_mask] = target_net(
             non_final_next_states).max(1)[0].detach()
+        next_state_values = next_state_values.unsqueeze(1)
 
         # Discount factor does not have to be calculated recursively.
         # Instead, we multiply the expected future state by gamma.
@@ -288,8 +290,11 @@ def train(simulators: List[Simulator], input_size: int):
         # Compute Huber loss
         criterion = nn.SmoothL1Loss()
         # Compare the predicted Q(S, A) with the expected Q(S, A)
+        # Debugging shapes
+        # print(state_action_values.shape,
+        #       expected_state_action_values.shape, next_state_values.shape, reward_batch.shape)
         loss = criterion(state_action_values,
-                         expected_state_action_values.unsqueeze(1))
+                         expected_state_action_values)
 
         # Optimize the model
         optimizer.zero_grad()
@@ -308,13 +313,25 @@ def train(simulators: List[Simulator], input_size: int):
 
     simulator = simulators[0]
 
-    RENDER_EPISODE = 1
+    RENDER_EPISODE = 10
+
+    last_rendered_world = None
 
     for i_episode in range(num_episodes):
+        # note: world is no longer closed here (5/5/2022 3:56pm)
         simulator.reset()
         total_distance = 0
         total_reward = 0
         prev_lines = []
+
+        if i_episode % RENDER_EPISODE == 0:
+            last_rendered_world = simulator.world
+
+        if (i_episode + 1) % RENDER_EPISODE == 0:
+            if last_rendered_world is not None:
+                last_rendered_world.close()
+                last_rendered_world = None
+
         for t in range(1000):
             for line in prev_lines:
                 line.undraw()
@@ -322,42 +339,14 @@ def train(simulators: List[Simulator], input_size: int):
 
             state = simulator.get_state()
 
-            if (i_episode % RENDER_EPISODE) == 0:
-                simulator.world.render()
-
-            c = simulator.car
-            w = simulator.world
-            v = w.visualizer
-            for i, angle in enumerate(np.linspace(c.heading, c.heading + 2 * np.pi, INPUT_SIZE + 1)[:-1]):
-                if not(i == 2 or i == INPUT_SIZE - 2):
-                    continue
-                dx = np.cos(angle) * 0.1
-                dy = np.sin(angle) * 0.1
-                distance = get_first_collision_n(
-                    c.center, simulator.world, dx, dy, 1000)
-                ppm = 6
-                L = GLine(GPoint(ppm*c.x, v.display_height - ppm*c.y), GPoint(
-                    ppm*(c.x + distance * dx * 10), v.display_height - ppm*(c.y + distance * dy * 10)))
-
-                L.setFill(f"#{int(255 * i/INPUT_SIZE):02X}0000")
-                L.draw(simulator.world.visualizer.win)
-                prev_lines.append(L)
-
-            v.win.flush()
-
             EPS_STEPS += 1
             eps = EPS_END + (EPS_START - EPS_END) * np.exp(-t / EPS_STEPS)
             action = select_action(state, eps)
 
-            action = 1
-            if state[2] > state[-4]:
-                action = 2
-            else:
-                action = 0
-            # print(state[1], state[-3])
-            # if state[1] < 0.1:
+            # action = 1
+            # if state[2] > state[-4]:
             #     action = 2
-            # elif state[-2 - 1] < 0.5:
+            # else:
             #     action = 0
 
             action = torch.tensor([action])
@@ -380,14 +369,39 @@ def train(simulators: List[Simulator], input_size: int):
             car_pos = simulator.car.center
             cv2.circle(canvas, (int(car_pos.x * 400/120), int(car_pos.y * 400/120)),
                        5, (0, 0, 255), -1)
-            cv2.imshow('canvas', canvas[::-1])
+            # cv2.imshow('canvas', canvas[::-1])
+
+            if (i_episode % RENDER_EPISODE) == 0:
+                simulator.world.render()
+
+                time.sleep(0.5)
+
+                c = simulator.car
+                w = simulator.world
+                v = w.visualizer
+                for i, angle in enumerate(np.linspace(c.heading, c.heading + 2 * np.pi, INPUT_SIZE + 1)[:-1]):
+                    if not(i == 2 or i == INPUT_SIZE - 2):
+                        continue
+                    dx = np.cos(angle) * 0.1
+                    dy = np.sin(angle) * 0.1
+                    distance = get_first_collision_n(
+                        c.center, simulator.world, dx, dy, 1000)
+                    ppm = 6
+                    L = GLine(GPoint(ppm*c.x, v.display_height - ppm*c.y), GPoint(
+                        ppm*(c.x + distance * dx * 10), v.display_height - ppm*(c.y + distance * dy * 10)))
+
+                    L.setFill(f"#{int(255 * i/INPUT_SIZE):02X}0000")
+                    L.draw(simulator.world.visualizer.win)
+                    prev_lines.append(L)
+
+                v.win.flush()
 
             if cv2.waitKey(1) == ord('q'):
                 exit()
 
             optimize_model()
             if done:
-                print(i_episode, t, total_distance, total_reward)
+                print(f"{i_episode=} {t=} {total_distance=:.2f} {total_reward=:.2f}")
                 break
 
         distance_history.append(t)
