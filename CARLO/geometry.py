@@ -30,6 +30,9 @@ class Point:
         
     def __truediv__(self, other: float) -> 'Point':
         return self.__mul__(1./other)
+    
+    def __repr__(self):
+        return '(' + str(self.x) + ', ' + str(self.y) + ')'
         
         
     def isInside(self, other: Union['Line', 'Rectangle', 'Circle', 'Ring']) -> bool:
@@ -130,6 +133,9 @@ class Line:
         
     def __str__(self):
         return 'Line(' + str(self.p1) +  ', ' + str(self.p2) + ')'
+    
+    def __repr__(self):
+        return str(self.p1) + ' -> ' + str(self.p2)
         
     def intersectsWith(self, other: Union['Line','Rectangle','Circle','Ring']):
         if isinstance(other, Line):
