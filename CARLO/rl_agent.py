@@ -91,16 +91,18 @@ class Simulator:
     def step(self, action: int):
         if action in [0, 1, 2]:
             # self.throttle += 0.5  # * self.world.dt
-            self.throttle = +0.5  # * self.world.dt
+            self.throttle = +0.2  # * self.world.dt
         elif action in [3, 4, 5]:
             # self.throttle -= 0.5  # * self.world.dt
-            self.throttle = -0.5  # * self.world.dt
+            self.throttle = -0.2  # * self.world.dt
+        else:
+            self.throttle = 0
 
         if action in [0, 6, 3]:
-            # self.steering += 0.05  # 1 * self.world.dt
+            # self.steering += 0.2  # 1 * self.world.dt
             self.steering = +0.2  # 1 * self.world.dt
         elif action in [2, 7, 5]:
-            # self.steering -= 0.05  # 1 * self.world.dt
+            # self.steering -= 0.2  # 1 * self.world.dt
             self.steering = -0.2  # 1 * self.world.dt
 
         self.car.set_control(self.steering, self.throttle)
@@ -343,8 +345,14 @@ def train(simulators: List[Simulator], input_size: int):
             eps = EPS_END + (EPS_START - EPS_END) * np.exp(-t / EPS_STEPS)
             action = select_action(state, eps)
 
-            # action = 1
-            # if state[2] > state[-4]:
+            print(state[2], state[-4])
+
+            action = 1
+            if state[2] > 0.15:
+                action = 2
+            else:
+                action = 0
+            # if (state[2] + state[3]) > (state[-4] + state[-5]):
             #     action = 2
             # else:
             #     action = 0
@@ -374,7 +382,7 @@ def train(simulators: List[Simulator], input_size: int):
             if (i_episode % RENDER_EPISODE) == 0:
                 simulator.world.render()
 
-                time.sleep(0.5)
+                # time.sleep(0.1)
 
                 c = simulator.car
                 w = simulator.world
@@ -429,7 +437,7 @@ CAR_START = Point(93, 60)
 def get_simulator():
     # A Car object is a dynamic object -- it can move. We construct it using its center location and heading angle.
     car = Car(CAR_START, np.pi/2)
-    car.max_speed = 30.0  # let's say the maximum is 30 m/s (108 km/h)
+    car.max_speed = 1.0  # let's say the maximum is 30 m/s (108 km/h)
     car.velocity = Point(0.0, 1.0)
 
     # return Simulator(create_intersection_world, car, INPUT_SIZE)

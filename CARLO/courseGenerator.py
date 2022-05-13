@@ -1,44 +1,57 @@
 import copy
-from email.errors import BoundaryError
 import math
 import random
 import re
-import numpy as np
-from geometry import Line
-from agents import RectangleBuilding
-from lidar import read_lidar
-from world import World
-from agents import Car, RingBuilding, CircleBuilding, Painting, Pedestrian
-from geometry import Point
 import time
+from email.errors import BoundaryError
 from tkinter import *
-from graphics import Line as GraphicsLine, Point as GraphicsPoint, Rectangle as GraphicsRectangle
+
+import numpy as np
+
+from agents import (Car, CircleBuilding, Painting, Pedestrian,
+                    RectangleBuilding, RingBuilding)
+from geometry import Line, Point
+# from graphics import Line as GraphicsLine
+# from graphics import Point as GraphicsPoint
+# from graphics import Rectangle as GraphicsRectangle
+from interactive_controllers import KeyboardController
+# from lidar import read_lidar
+from world import World
+
 
 def CourseGenerator():
-    dt = 0.1  # time steps in terms of seconds. In other words, 1/dt is the FPS.
+    # time steps in terms of seconds. In other words, 1/dt is the FPS.
+    dt = 0.1
     w = World(dt, width=120, height=120, ppm=6)
     # w.add(RectangleBuilding(Point(72.5, 107.5), Point(95, 25)))
     # w.add(RectangleBuilding(Point(7.5, 107.5), Point(15, 25)))
     # w.add(RectangleBuilding(Point(7.5, 40), Point(15, 80)))
 
     # w.add(RectangleBuilding(Point(72.5, 40), Point(95, 80)))
-    line1 = Line(Point(20,20), Point(20,90))
     # need to generate a continous path with a specified number of ups and downs that add to 0
 
-    path = generatePath(Point(20,20), Point(20,60))
-    print(path)
-    rects = pathToRects(path, 5)
-    for rect in rects:
-        w.add(rect)
+    path1 = generatePath(Point(20, 20), Point(100, 120))
+    path2 = generatePath(Point(100, 20), Point(100, 120))
+    path3 = generatePath(Point(20, 20), Point(100, 20))
+
+    for path in [path1, path2, path3]:
+        for rect in pathToRects(path):
+            w.add(rect)
+
     car = Car(Point(20, 20), np.pi/2)
     w.add(car)
+    w.render()
+    controller = KeyboardController(w)
     while True:
-        try: 
+        try:
+            car.set_control(controller.steering, controller.throttle)
             w.render()
+            w.visualizer.win.flush()
             time.sleep(dt)
         except:
             break
     return [car, w]
+
 
 def generatePath(startpoint, endpoint):
     # randomly choose number of ups and rights [minimum distance].
@@ -54,7 +67,8 @@ def generatePath(startpoint, endpoint):
     numRights = randomRights + totalNumRights
     numLefts = randomRights
 
-    pathSteps = [*[Point(0,5) for i in range(numUps)], *[Point(5,0) for i in range(numRights)], *[Point(0,-5) for i in range(numDowns)], *[Point(-5,0) for i in range(numLefts)]]
+    pathSteps = [*[Point(0, 5) for i in range(numUps)], *[Point(5, 0) for i in range(numRights)],
+                 *[Point(0, -5) for i in range(numDowns)], *[Point(-5, 0) for i in range(numLefts)]]
 
     lines = []
     previousStep = None
@@ -69,7 +83,7 @@ def generatePath(startpoint, endpoint):
                 step = remainingSteps[index]
                 tries += 1
             if tries >= 5:
-                steps = [Point(5,0), Point(-5,0), Point(0,5), Point(0,-5)]
+                steps = [Point(5, 0), Point(-5, 0), Point(0, 5), Point(0, -5)]
                 steps.remove(backwardStep)
                 steps.remove(previousStep)
                 step = random.choice(steps)
@@ -83,48 +97,61 @@ def generatePath(startpoint, endpoint):
         line = Line(pos, pos + step)
         lines.append(line)
         pos += step
-    
+
     return lines
 
-def pathToRects(lines, width):
+
+def pathToRects(lines):
+    grid_width = 120
+    grid_height = 120
+
+    import cv2
+
+    grid = np.ones((grid_height, grid_width))
+
     rects = []
-    for i in range(len(lines) - 1):
-        currentLine = lines[i]
-        nextLine = lines[i + 1]
+    for line in lines:
+        p1, p2 = line.p1, line.p2
 
-        # figure out if nextLine is left, right, or forward from current line
-        dist = currentLine.p1.distanceTo(currentLine.p2)
-        difference = (currentLine.p2 - currentLine.p1)
-        centerPoint = currentLine.p1 + difference / 2
-        perDir = Point(-difference.y, difference.x) / difference.norm()
-        lineDir = difference / difference.norm()
-        if lineDir.x != 0:
-            size = Point(dist, 1)
-        elif lineDir.y != 0:
-            size = Point(1, dist)
-        else:
-            print("huH")
-            size = Point(1, 1)
+        def p2i(pt): return (int(pt.x), int(pt.y))
 
-        if angleBetween(currentLine, nextLine) == 90:
-            # next line is right
-            rects.append(RectangleBuilding(centerPoint + width * 0.5 * perDir, size))
-            rects.append(RectangleBuilding(centerPoint - width * 0.5 * perDir - width * 0.5 * lineDir, size))
-            pass
-        elif angleBetween(currentLine, nextLine) == -90:
-            # next line is left
-            rects.append(RectangleBuilding(centerPoint + width * 0.5 * perDir - width * 0.5 * lineDir, size))
-            rects.append(RectangleBuilding(centerPoint - width * 0.5 * perDir, size))
-            pass
-        elif angleBetween(currentLine, nextLine) == 0:
-            # next line is forward
-            rects.append(RectangleBuilding(centerPoint + width * 0.5 * perDir, size))
-            rects.append(RectangleBuilding(centerPoint - width * 0.5 * perDir, size))
-        elif angleBetween(currentLine, nextLine) == 180 or angleBetween(currentLine, nextLine) == -180:
-            # next line is backwards
-            # this should never happen.
-            pass
+        cv2.line(grid, p2i(p1), p2i(p2), 0, 2)
+
+    road_width = 2
+
+    for y in range(120):
+        for x in range(120):
+            # If this grid square is fully enclosed, suppress it
+            enclosed = True
+
+            indexes = [
+                (surrounding_y, surrounding_x)
+                for surrounding_y in range(y - road_width, y + road_width + 1)
+                for surrounding_x in range(x - road_width, x + road_width + 1)
+
+                if (surrounding_y != y) or (surrounding_x != x)
+            ]
+
+            for index in indexes:
+                if index[0] < 0 or index[0] >= grid_height:
+                    continue
+
+                if index[1] < 0 or index[1] >= grid_height:
+                    continue
+
+                is_occupied = grid[index]
+
+                if not is_occupied:
+                    enclosed = False
+
+            if not enclosed:
+                print("add square")
+                # add square
+                center = Point(x + 0.5, y + 0.5)
+                rects.append(RectangleBuilding(center, Point(1, 1)))
+
     return rects
+
 
 def lineToRects(line, width):
     rects = []
@@ -132,9 +159,12 @@ def lineToRects(line, width):
     difference = (line.p2 - line.p1)
     centerPoint = line.p1 + difference / 2
     perDir = Point(-difference.y, difference.x) / difference.norm()
-    rects.append(RectangleBuilding(centerPoint + width * 0.5 * perDir, Point(1, dist)))
-    rects.append(RectangleBuilding(centerPoint - width * 0.5 * perDir, Point(1, dist)))
+    rects.append(RectangleBuilding(
+        centerPoint + width * 0.5 * perDir, Point(1, dist)))
+    rects.append(RectangleBuilding(
+        centerPoint - width * 0.5 * perDir, Point(1, dist)))
     return rects
+
 
 def angleBetween(l1, l2):
     p1 = l1.p2 - l1.p1
