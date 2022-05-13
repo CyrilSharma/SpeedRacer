@@ -34,9 +34,12 @@ def CourseGenerator():
     path2 = generatePath(Point(100, 20), Point(100, 120))
     path3 = generatePath(Point(20, 20), Point(100, 20))
 
-    for path in [path1, path2, path3]:
-        for rect in pathToRects(path):
-            w.add(rect)
+    grid = pathToGrid(path1)
+    grid = pathToGrid(path2, grid)
+    grid = pathToGrid(path3, grid)
+
+    for rect in grid_to_rects(grid):
+        w.add(rect)
 
     car = Car(Point(20, 20), np.pi/2)
     w.add(car)
@@ -101,15 +104,17 @@ def generatePath(startpoint, endpoint):
     return lines
 
 
-def pathToRects(lines):
-    grid_width = 120
-    grid_height = 120
+grid_width = 120
+grid_height = 120
+
+
+def pathToGrid(lines, grid=None):
 
     import cv2
 
-    grid = np.ones((grid_height, grid_width))
+    if grid is None:
+        grid = np.ones((grid_height, grid_width))
 
-    rects = []
     for line in lines:
         p1, p2 = line.p1, line.p2
 
@@ -117,14 +122,20 @@ def pathToRects(lines):
 
         cv2.line(grid, p2i(p1), p2i(p2), 0, 2)
 
+    return grid
+
+
+def grid_to_rects(grid):
+    rects = []
     road_width = 2
+    wall_width = 1
 
     for y in range(120):
         for x in range(120):
             # If this grid square is fully enclosed, suppress it
-            enclosed = True
+            road_bin1 = False
 
-            indexes = [
+            road_check_indexes = [
                 (surrounding_y, surrounding_x)
                 for surrounding_y in range(y - road_width, y + road_width + 1)
                 for surrounding_x in range(x - road_width, x + road_width + 1)
@@ -132,23 +143,43 @@ def pathToRects(lines):
                 if (surrounding_y != y) or (surrounding_x != x)
             ]
 
-            for index in indexes:
+            for index in road_check_indexes:
                 if index[0] < 0 or index[0] >= grid_height:
                     continue
 
                 if index[1] < 0 or index[1] >= grid_height:
                     continue
 
-                is_occupied = grid[index]
+                if grid[index[0]][index[1]] == 0:
+                    road_bin1 = True
 
-                if not is_occupied:
-                    enclosed = False
+            road_bin2 = False
 
-            if not enclosed:
-                print("add square")
+            obstacle_check_indexes = [
+                (surrounding_y, surrounding_x)
+                for surrounding_y in range(y - road_width - wall_width, y + road_width + wall_width + 1)
+                for surrounding_x in range(x - road_width - wall_width, x + road_width + wall_width + 1)
+
+                if (surrounding_y != y) or (surrounding_x != x)
+            ]
+
+            for index in obstacle_check_indexes:
+                if index[0] < 0 or index[0] >= grid_height:
+                    continue
+
+                if index[1] < 0 or index[1] >= grid_height:
+                    continue
+
+                if grid[index[0]][index[1]] == 0:
+                    road_bin2 = True
+
+            if road_bin2 and not road_bin1:
+                # print("add square")
                 # add square
                 center = Point(x + 0.5, y + 0.5)
                 rects.append(RectangleBuilding(center, Point(1, 1)))
+
+    # print("done")
 
     return rects
 
