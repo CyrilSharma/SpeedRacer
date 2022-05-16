@@ -10,7 +10,6 @@
 #define navigator_h
 
 #include "rpLidarTypes.h"
-#include <vector>
 
 class Navigator{
 	public:
@@ -29,4 +28,3 @@ class Navigator{
 	HardwareSerial *serial;		///< pointer to HardwareSerial USART 
 };
 
-#endif

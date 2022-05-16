@@ -149,11 +149,9 @@ void rpLidar::DebugPrintMeasurePoints(int16_t count)
       dot.angle = (((float)_cached_scan_node_hq_buf[pos].angle_z_q14) * 90.0 / 16384.0);
       dot.dist = _cached_scan_node_hq_buf[pos].dist_mm_q2 /4.0f;
       Serial.println(dot.angle);
-      if (dot.angle >= 180 && dot.angle <= 181){
-        Serial.print(dot.angle);
-        Serial.print(":");
-        Serial.println(dot.dist);
-      }
+      Serial.print(dot.angle);
+      Serial.print(":");
+      Serial.println(dot.dist);
       //Serial.print(":");
       //Serial.print(dot.quality);
   }
