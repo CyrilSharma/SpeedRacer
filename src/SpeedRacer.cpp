@@ -34,7 +34,10 @@ double getAverageDistance(const std::vector<scanDot> dots, float min_angle, floa
 */
 void setSteeringAngle(int angle) {
   // Uses an angular servo. Therefore, `angle` sets the target angle of the servo.
-  steeringServo.write(angle);
+  // -180 - 180 -> 1000 - 2000
+
+  int mappedValue = (int) (1000 * (angle + 180.0) / 360 + 1000);
+  steeringServo.writeMicroseconds(mappedValue);
 }
 
 /**
@@ -42,15 +45,15 @@ void setSteeringAngle(int angle) {
  this is roughly mapped so that 0 is at the stop value
 */
 void setThrottle(float throttle) {
-  int mappedValue = (int) ((throttle + 1) * 180);
+  int mappedValue = (int) ((throttle + 1) * 500 + 1000);
   if (mappedValue < 0) {
     mappedValue = 0;
-  } else if (mappedValue > 180) {
-    mappedValue = 180;
+  } else if (mappedValue >= 2000) {
+    mappedValue = 2000;
   }
-
+  Serial.print("throttle:"); Serial.println(mappedValue);
   // Uses a continuous servo. Therefore, `angle` sets the speed of the servo.
-  throttleServo.write(throttle);
+  throttleServo.writeMicroseconds(mappedValue);
 }
 
 /****** MAIN NAVIGATION CODE ****
@@ -63,7 +66,8 @@ void navigate(std::vector<scanDot> points) {
 
   double leftAverageDistance = getAverageDistance(points, 36, 54);
   double rightAverageDistance = getAverageDistance(points, 308, 324);
-
+  Serial.print("left"); Serial.println(leftAverageDistance);
+  Serial.print("right"); Serial.println(rightAverageDistance);
   if (leftAverageDistance > rightAverageDistance) {
     setSteeringAngle(45);
   } else {
@@ -84,7 +88,6 @@ void setup() {
 
   steeringServo.attach(Pins::STEERING);
   throttleServo.attach(Pins::THROTTLE);
-  
   Serial.begin(115200);
   esp_task_wdt_init(36000, false); // Turn off watchdog so core 0 task doesn't cause reset
   lidar.stopDevice(); // Reset the device to be sure that the status is good
@@ -119,11 +122,12 @@ void loop()
   // each cache load contains a full 360 scan. If you slow down the rotations too much it will not fit and data will be lost (too many points per 360 deg for cache size allowable on ESP32)
   
   // READ
-  lidar.DebugPrintMeasurePoints(lidar._cached_scan_node_hq_count);
+  // lidar.DebugPrintMeasurePoints(lidar._cached_scan_node_hq_count);
   
   // CONTROL/ACTUATE
   std::vector<scanDot> points = lidar.getPoints(lidar._cached_scan_node_hq_count);
   navigate(points);
+  setThrottle(1);
   
   delay(1);
 }
