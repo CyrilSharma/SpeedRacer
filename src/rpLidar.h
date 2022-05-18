@@ -10,6 +10,7 @@
 #define rplidar_h
 
 #include "rpLidarTypes.h"
+#include <vector>
 
 class rpLidar{
 	public:
@@ -78,6 +79,8 @@ class rpLidar{
 	void DebugPrintDescriptor(rp_descriptor_t _descriptor); ///< prints descriptor in Serial Monitor
 	void DebugPrintBufferAsHex();				///< prints Standard Data as Hex splitted with ","  in Serial Monitor
 
+	std::vector<scanDot> getPoints(int16_t count);
+	int getAngle(int16_t count, int16_t min, int16_t max);
 	
 	//point_t Data[1540]; ///< stores the raw scan data
 	//stScanDataPoint_t DataBuffer[1500];	///<Storage to save the Data of a Standard Scan

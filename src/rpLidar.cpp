@@ -7,6 +7,7 @@
  */
 #include "rpLidar.h"
 #include "Arduino.h"
+#include <vector>
 
 static sl_u32 _varbitscale_decode(sl_u32 scaled, sl_u32 & scaleLevel)
 {
@@ -155,6 +156,41 @@ void rpLidar::DebugPrintMeasurePoints(int16_t count)
       //Serial.print(":");
       //Serial.print(dot.quality);
   }
+}
+
+std::vector<scanDot> rpLidar::getPoints(int16_t count)
+{
+  std::vector<scanDot> pts;
+  for (int pos = 0; pos < (int)count; ++pos) {
+      scanDot dot;
+      if (!_cached_scan_node_hq_buf[pos].dist_mm_q2) continue;
+      //dot.quality = _cached_scan_node_hq_buf[pos].quality; //quality is broken for some reason
+      dot.angle = (((float)_cached_scan_node_hq_buf[pos].angle_z_q14) * 90.0 / 16384.0);
+      dot.dist = _cached_scan_node_hq_buf[pos].dist_mm_q2 /4.0f;
+      pts.push_back(dot);
+    //   Serial.println(dot.angle);
+    //   Serial.print(dot.angle);
+    //   Serial.print(":");
+    //   Serial.println(dot.dist);
+      //Serial.print(":");
+      //Serial.print(dot.quality);
+  }
+  return pts;
+}
+
+int rpLidar::getAngle(int16_t count, int16_t min, int16_t max) {
+  std::vector<int> values;
+  for (int pos = 0; pos < (int)count; ++pos) {
+      scanDot dot;
+      if (!_cached_scan_node_hq_buf[pos].dist_mm_q2) continue;
+      //dot.quality = _cached_scan_node_hq_buf[pos].quality; //quality is broken for some reason
+      dot.angle = (((float) _cached_scan_node_hq_buf[pos].angle_z_q14) * 90.0 / 16384.0);
+      dot.dist = _cached_scan_node_hq_buf[pos].dist_mm_q2 /4.0f;
+      if (dot.angle >= min && dot.angle <= max) {
+          return dot.dist;
+      }
+  }
+  return 0;
 }
 
 void rpLidar::DebugPrintDeviceErrorStatus(stDeviceStatus_t _status)
