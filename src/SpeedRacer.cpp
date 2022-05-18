@@ -1,10 +1,36 @@
+#include <Arduino.h>
 #include "rpLidar.h"
 #include "rpLidarTypes.h"
 #include <esp_task_wdt.h>
 
-
 rpLidar lidar(&Serial2,115200,13,12);
 
+
+double getAverageDistance(int16_t count, float min_angle, float max_angle)
+{
+  float distanceSum = 0;
+  int distanceCount = 0;
+
+  for (int pos = 0; pos < (int)count; ++pos) {
+      scanDot dot;
+      if (!_cached_scan_node_hq_buf[pos].dist_mm_q2) continue;
+      //dot.quality = _cached_scan_node_hq_buf[pos].quality; //quality is broken for some reason
+      dot.angle = (((float)_cached_scan_node_hq_buf[pos].angle_z_q14) * 90.0 / 16384.0);
+      dot.dist = _cached_scan_node_hq_buf[pos].dist_mm_q2 /4.0f;
+      
+      // Might be some trippy stuff with angles...
+      if (dot.angle >= min_angle && dot.angle <= max_angle) {
+        distanceSum += dot.dist;
+        distanceCount++;
+      }
+  }
+
+  if (distanceCount == 0) {
+    return 0;
+  }
+
+  return (distanceSum / distanceCount);
+}
 static void readPoints(void * parameter){
   while(true){
     int result = lidar.cacheUltraCapsuledScanData();
@@ -12,8 +38,10 @@ static void readPoints(void * parameter){
   }
 }
 void setup() {
- 
-  Serial.begin(921600);
+
+  pinMode(19,OUTPUT);
+  digitalWrite(19,HIGH);
+  Serial.begin(115200);
   esp_task_wdt_init(36000, false); //turn off watchdog so core 0 task doesn't cause reset
   lidar.stopDevice(); //reset the device to be sure that the status is good
   delay(1);
