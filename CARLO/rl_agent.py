@@ -21,7 +21,7 @@ from world import World
 
 
 class RLCar(nn.Module):
-    def __init__(self, input_size: int, n_actions: int):
+    def __init__(self, input_size: int, n_actions: int, prev_state_lookback):
         super().__init__()
 
         # self.conv1 = nn.Conv1d(
@@ -33,7 +33,7 @@ class RLCar(nn.Module):
         # self.flatten = nn.Flatten()
 
         # One for speed, one for angular velocity
-        self.fc1 = nn.Linear(input_size + 2, 16)
+        self.fc1 = nn.Linear((input_size + 2) * prev_state_lookback, 16)
         self.fc2 = nn.Linear(16, 16)
         # self.fc3 = nn.Linear(16, 16)
 
@@ -53,7 +53,7 @@ class RLCar(nn.Module):
 
 
 class Simulator:
-    def __init__(self, world_factory: Callable[[], World], car: Car, n_lidar_divisions: int):
+    def __init__(self, world_factory: Callable[[], World], car: Car, n_lidar_divisions: int, prev_state_lookback: int):
         self.world_factory = world_factory
         self.car = car
         self.car_initial_state = (
@@ -67,7 +67,12 @@ class Simulator:
         self.timestep = 0
         self.stopped_at_timestep = None
 
-        self.stop_patience = 10
+        self.prev_states = deque(maxlen=prev_state_lookback)
+        self.prev_state_lookback = prev_state_lookback
+
+        self.state_frame_size = n_lidar_divisions + 2
+
+        self.stop_patience = 5
 
     def car_location_to_grid_tile(self, x: float, y: float):
         return (int(x), int(y))
@@ -172,7 +177,14 @@ class Simulator:
         # Combine lidar measurements and car kinematics
         combined = torch.cat([lidar_measurements_normalized, velocity_tensor])
 
-        return combined
+        self.prev_states.append(combined)
+
+        # add support for past timesteps
+        while len(self.prev_states) < self.prev_state_lookback:
+            # pad with 0's
+            self.prev_states.appendleft(torch.zeros_like(combined))
+
+        return torch.cat(tuple(self.prev_states), dim=0)
 
     def collided(self):
         return self.world.collision_exists(self.car)
@@ -190,7 +202,12 @@ class ReplayMemory:
         self.memory.append(Transition(*args))
 
     def sample(self, batch_size: int):
-        return random.sample(self.memory, batch_size)
+        # Sampling weight should be reward^2
+        weights = np.array([transition.reward ** 2 for transition in self.memory])
+        weights = weights / (np.sum(weights) + 1e-9)
+        selected_indices = np.random.choice(list(range(len(self.memory))), size=batch_size, p=weights)
+
+        return [self.memory[i] for i in selected_indices]
 
     def __len__(self):
         return len(self.memory)
@@ -216,8 +233,10 @@ def train(simulators: List[Simulator], input_size: int):
 
     device = torch.device('cpu')
 
-    policy_net = RLCar(input_size, n_actions).to(device)
-    target_net = RLCar(input_size, n_actions).to(device)
+    policy_net = RLCar(input_size, n_actions,
+                       prev_state_lookback=PREV_STATE_LOOKBACK).to(device)
+    target_net = RLCar(input_size, n_actions,
+                       prev_state_lookback=PREV_STATE_LOOKBACK).to(device)
     target_net.load_state_dict(policy_net.state_dict())
     # Set the target net to evaluation mode
     target_net.eval()
@@ -345,19 +364,17 @@ def train(simulators: List[Simulator], input_size: int):
             eps = EPS_END + (EPS_START - EPS_END) * np.exp(-t / EPS_STEPS)
             action = select_action(state, eps)
 
-            print(state[2], state[-4])
-
-            action = 1
-            if state[2] > 0.15:
-                action = 2
-            else:
-                action = 0
+            # action = 1
+            # if state[2] > 0.15:
+            #     action = 2
+            # else:
+            #     action = 0
             # if (state[2] + state[3]) > (state[-4] + state[-5]):
             #     action = 2
             # else:
             #     action = 0
 
-            action = torch.tensor([action])
+            # action = torch.tensor([action])
 
             # action = torch.tensor([0 if t % 2 == 0 else 1])
 
@@ -433,6 +450,8 @@ INPUT_SIZE = 20
 CAR_START = Point(93, 60)
 # CAR_START = Point(20, 20)
 
+PREV_STATE_LOOKBACK = 3
+
 
 def get_simulator():
     # A Car object is a dynamic object -- it can move. We construct it using its center location and heading angle.
@@ -441,7 +460,7 @@ def get_simulator():
     car.velocity = Point(0.0, 1.0)
 
     # return Simulator(create_intersection_world, car, INPUT_SIZE)
-    return Simulator(create_circular_world, car, INPUT_SIZE)
+    return Simulator(create_circular_world, car, INPUT_SIZE, prev_state_lookback=PREV_STATE_LOOKBACK)
 
 
 if __name__ == "__main__":
